@@ -8,6 +8,7 @@ import {
   buildCSV,
   buildSummary,
   formatUSD,
+  round2,
   toUSD,
   type Category,
   type Expense,
@@ -15,6 +16,34 @@ import {
 } from "@/lib/expenses-data";
 type SortKey = "date" | "usd";
 type SortDir = "asc" | "desc";
+
+// ─── Category colors ────────────────────────────────────────────────────────────
+const CATEGORY_COLORS: Record<string, string> = {
+  Travel: "#3b6fd6",
+  Software: "#8b5cf6",
+  Food: "#16a34a",
+  Entertainment: "#d97706",
+};
+
+function CategoryDot({ category }: { category: string }) {
+  return (
+    <span style={{
+      display: "inline-block", width: 7, height: 7, borderRadius: "50%",
+      background: CATEGORY_COLORS[category] ?? "var(--muted-foreground)", marginRight: 8, flexShrink: 0,
+    }} />
+  );
+}
+
+// ─── Inline share bar ───────────────────────────────────────────────────────────
+function ShareBar({ pct, color, width = 90 }: { pct: number; color: string; width?: number }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ width, height: 6, borderRadius: 99, background: "var(--surface-2)", overflow: "hidden", flexShrink: 0 }}>
+        <div style={{ width: `${Math.min(pct, 100)}%`, height: "100%", borderRadius: 99, background: color }} />
+      </div>
+    </div>
+  );
+}
 
 // ─── Sparkline ────────────────────────────────────────────────────────────────
 function Sparkline({ values, accent = false }: { values: number[]; accent?: boolean }) {
@@ -56,6 +85,30 @@ export default function App() {
   const eurDeltaPct = baseSummary.totalUSD > 0
     ? ((eurDelta / baseSummary.totalUSD) * 100).toFixed(1)
     : "0.0";
+
+  // Insight card derivations
+  const insights = useMemo(() => {
+    if (summary.byCategory.length === 0) return null;
+    const topCat = summary.byCategory[0];
+    const top3Sum = summary.topMerchants.reduce((s, m) => s + m.totalUSD, 0);
+    const top3Pct = summary.totalUSD > 0 ? round2((top3Sum / summary.totalUSD) * 100) : 0;
+    const monthTotals = MONTHS.map((m) => ({
+      month: m,
+      total: round2(summary.byCategory.reduce((s, c) => s + c.monthlyUSD[m], 0)),
+    }));
+    const busiest = monthTotals.reduce((a, b) => (b.total > a.total ? b : a), monthTotals[0]);
+    // find which category drove the busiest month
+    const busiestCat = summary.byCategory.reduce((a, c) =>
+      c.monthlyUSD[busiest.month] > (a?.monthlyUSD[busiest.month] ?? -1) ? c : a, summary.byCategory[0]);
+    return {
+      topCat,
+      largestSinglePct: summary.totalUSD > 0 ? round2((topCat.largestUSD / summary.totalUSD) * 100) : 0,
+      top3Pct,
+      busiestMonth: busiest.month,
+      busiestTotal: busiest.total,
+      busiestDriver: busiestCat.largestMerchant || busiestCat.category,
+    };
+  }, [summary]);
 
   const filtered = useMemo(() => {
     const rows = activeCategory ? expenses.filter((e) => e.category === activeCategory) : expenses;
@@ -132,39 +185,52 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen" style={{ background: "var(--background)" }}>
+    <div style={{ minHeight: "100vh", background: "var(--background)" }}>
       {/* Header */}
       <header style={{ borderBottom: "1px solid var(--border)", background: "var(--surface)" }}>
-        <div className="mx-auto max-w-6xl px-6 py-8">
-          <div className="flex flex-wrap items-end justify-between gap-6">
+        <div style={{ maxWidth: 1180, margin: "0 auto", padding: "40px 28px 32px" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", justifyContent: "space-between", gap: 28 }}>
             <div>
               <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--brand)" }}>
                 Spendlens
               </div>
-              <h1 style={{ marginTop: 8, fontSize: "clamp(1.75rem, 4vw, 2.75rem)", fontFamily: "var(--font-display)", letterSpacing: "-0.01em", lineHeight: 1.15 }}>
+              <h1 style={{ marginTop: 10, fontSize: "clamp(1.9rem, 4vw, 3rem)", fontFamily: "var(--font-display)", letterSpacing: "-0.01em", lineHeight: 1.12 }}>
                 Monthly expense summary, in USD.
               </h1>
-              <p style={{ marginTop: 6, fontSize: 13, color: "var(--muted-foreground)", maxWidth: 480 }}>
-                Twenty transactions across ten currencies, converted from the rate snapshot of 1 May 2026. Filter, sort, add a row, adjust the EUR rate, or export for the board pack.
+              <p style={{ marginTop: 10, fontSize: 13.5, lineHeight: 1.6, color: "var(--muted-foreground)", maxWidth: 460 }}>
+                Twenty transactions across ten currencies, converted using the rate snapshot from 2026-05-01.
+                Filter, sort, add a row, or stress-test the EUR rate.
               </p>
             </div>
-            <div style={{ borderRadius: 14, border: "1px solid var(--border)", background: "var(--surface-2)", padding: "14px 20px", minWidth: 180 }}>
-              <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--muted-foreground)" }}>
-                Total spend
-              </div>
-              <div className="num" style={{ marginTop: 4, fontSize: "1.9rem", fontWeight: 700, color: "var(--foreground)" }}>
-                {formatUSD(summary.totalUSD)}
-              </div>
-              {Math.abs(eurDelta) > 0.005 && (
-                <div className="num" style={{ marginTop: 4, fontSize: 11, color: eurDelta >= 0 ? "#16a34a" : "#dc2626" }}>
-                  {eurDelta >= 0 ? "+" : ""}{formatUSD(eurDelta)} ({eurDelta >= 0 ? "+" : ""}{eurDeltaPct}%) vs base EUR
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
+              <div style={{ borderRadius: 14, border: "1px solid var(--border)", background: "var(--surface-2)", padding: "16px 24px", minWidth: 200, textAlign: "right" }}>
+                <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.18em", textTransform: "uppercase", color: "var(--muted-foreground)" }}>
+                  Total spend
                 </div>
-              )}
+                <div className="num" style={{ marginTop: 5, fontSize: "2.1rem", fontWeight: 700, color: "var(--foreground)" }}>
+                  {formatUSD(summary.totalUSD)}
+                </div>
+                {Math.abs(eurDelta) > 0.005 && (
+                  <div className="num" style={{ marginTop: 4, fontSize: 11, color: eurDelta >= 0 ? "#16a34a" : "#dc2626" }}>
+                    {eurDelta >= 0 ? "+" : ""}{formatUSD(eurDelta)} ({eurDelta >= 0 ? "+" : ""}{eurDeltaPct}%) vs base EUR
+                  </div>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={downloadBoardReport}
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", fontSize: 12.5, fontWeight: 500, cursor: "pointer" }}>
+                  🖶 Board Report
+                </button>
+                <button onClick={downloadCSV}
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", fontSize: 12.5, fontWeight: 500, cursor: "pointer" }}>
+                  ↓ Export CSV
+                </button>
+              </div>
             </div>
           </div>
 
           {/* Tab nav */}
-          <nav style={{ marginTop: 24, display: "flex", gap: 4 }}>
+          <nav style={{ marginTop: 28, display: "flex", gap: 4 }}>
             {(["dashboard", "about"] as const).map((tab) => (
               <button key={tab} onClick={() => setActiveTab(tab)}
                 style={{
@@ -180,22 +246,39 @@ export default function App() {
       </header>
 
       {activeTab === "dashboard" ? (
-        <main className="mx-auto max-w-6xl px-6 py-10" style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+        <main style={{ maxWidth: 1180, margin: "0 auto", padding: "40px 28px 56px", display: "flex", flexDirection: "column", gap: 40 }}>
+          {/* Insight cards */}
+          {insights && (
+            <section style={{ display: "grid", gap: 20, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
+              <InsightCard label="Cost driver">
+                <strong>{insights.topCat.category}</strong> dominates at {insights.topCat.pctOfTotal}% of total spend.
+                A single {formatUSD(insights.topCat.largestUSD)} charge from {insights.topCat.largestMerchant} accounts for {insights.largestSinglePct}% of the entire budget.
+              </InsightCard>
+              <InsightCard label="Concentration">
+                Top 3 merchants — {summary.topMerchants.map((m) => m.merchant).join(", ")} — account for {insights.top3Pct}% of total spend.
+                High concentration in {insights.topCat.category} warrants a closer look at trip consolidation.
+              </InsightCard>
+              <InsightCard label="Busiest month">
+                {insights.busiestMonth} 2026 was the highest-spend month at {formatUSD(insights.busiestTotal)}, driven by {insights.busiestDriver}.
+              </InsightCard>
+            </section>
+          )}
+
           {/* Summary grid */}
           <section style={{ display: "grid", gap: 24, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
             {/* Category table */}
-            <div style={{ borderRadius: 16, border: "1px solid var(--border)", background: "var(--surface)", padding: 24, gridColumn: "1 / -1" }}>
-              <Eyebrow>Part A — Spend by category</Eyebrow>
-              <h2 style={{ marginTop: 4, fontSize: "1.35rem", fontFamily: "var(--font-display)" }}>Where the money went</h2>
-              <p style={{ marginTop: 4, fontSize: 12, color: "var(--muted-foreground)" }}>
-                Click any row to filter the transaction table. Sparklines show monthly spend Feb → May.
+            <div style={{ borderRadius: 16, border: "1px solid var(--border)", background: "var(--surface)", padding: 28, gridColumn: "1 / -1" }}>
+              <Eyebrow>Part A</Eyebrow>
+              <h2 style={{ marginTop: 4, fontSize: "1.4rem", fontFamily: "var(--font-display)" }}>Spend by category</h2>
+              <p style={{ marginTop: 5, fontSize: 12.5, color: "var(--muted-foreground)" }}>
+                Ranked by USD total. Click a row to filter the table below.
               </p>
-              <div style={{ marginTop: 16, overflowX: "auto" }}>
+              <div style={{ marginTop: 20, overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                      {["Category", "Txns", "Total (USD)", "% of total", "Trend Feb→May", "Largest single"].map((h) => (
-                        <th key={h} style={{ padding: "6px 12px", textAlign: h === "Category" || h === "Trend Feb→May" ? "left" : "right", fontSize: 10, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--muted-foreground)", whiteSpace: "nowrap" }}>{h}</th>
+                      {["Category", "Txns", "Total (USD)", "Share", "Largest single"].map((h) => (
+                        <th key={h} style={{ padding: "8px 12px", textAlign: h === "Category" ? "left" : h === "Share" ? "left" : "right", fontSize: 10, fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--muted-foreground)", whiteSpace: "nowrap" }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -203,9 +286,7 @@ export default function App() {
                     {summary.byCategory.map((c) => {
                       const active = activeCategory === c.category;
                       const monthVals = MONTHS.map((m) => c.monthlyUSD[m]);
-                      const lastMo = monthVals[monthVals.length - 1];
-                      const prevMo = monthVals[monthVals.length - 2] ?? 0;
-                      const trending = lastMo > prevMo;
+                      const color = CATEGORY_COLORS[c.category] ?? "var(--brand)";
                       return (
                         <tr key={c.category}
                           onClick={() => setActiveCategory(active ? null : c.category as Category)}
@@ -216,22 +297,34 @@ export default function App() {
                           onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLElement).style.background = "var(--surface-2)"; }}
                           onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = active ? "var(--accent)" : ""; }}
                         >
-                          <td style={{ padding: "12px 12px", fontWeight: 600 }}>{c.category}</td>
-                          <td className="num" style={{ padding: "12px 12px", textAlign: "right", color: "var(--muted-foreground)" }}>{c.count}</td>
-                          <td className="num" style={{ padding: "12px 12px", textAlign: "right", fontWeight: 700 }}>{formatUSD(c.totalUSD)}</td>
-                          <td className="num" style={{ padding: "12px 12px", textAlign: "right", color: "var(--muted-foreground)" }}>{c.pctOfTotal}%</td>
-                          <td style={{ padding: "6px 12px" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <td style={{ padding: "16px 12px", fontWeight: 600 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <span style={{ display: "flex", alignItems: "center" }}><CategoryDot category={c.category} />{c.category}</span>
                               <Sparkline values={monthVals} accent />
-                              <span style={{ fontSize: 10, color: trending ? "#16a34a" : "#dc2626", fontWeight: 600 }}>{trending ? "↑" : "↓"}</span>
                             </div>
                           </td>
-                          <td className="num" style={{ padding: "12px 12px", textAlign: "right", color: "var(--muted-foreground)", fontSize: 12 }}>
-                            {formatUSD(c.largestUSD)} · {c.largestMerchant}
+                          <td className="num" style={{ padding: "16px 12px", textAlign: "right", color: "var(--muted-foreground)" }}>{c.count}</td>
+                          <td className="num" style={{ padding: "16px 12px", textAlign: "right", fontWeight: 700 }}>{formatUSD(c.totalUSD)}</td>
+                          <td style={{ padding: "16px 12px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <ShareBar pct={c.pctOfTotal} color={color} />
+                              <span className="num" style={{ fontSize: 12.5, color: "var(--muted-foreground)", minWidth: 38 }}>{c.pctOfTotal}%</span>
+                            </div>
+                          </td>
+                          <td style={{ padding: "16px 12px", textAlign: "right" }}>
+                            <div className="num" style={{ fontWeight: 600, fontSize: 13 }}>{formatUSD(c.largestUSD)}</div>
+                            <div style={{ fontSize: 11.5, color: "var(--muted-foreground)" }}>{c.largestMerchant}</div>
                           </td>
                         </tr>
                       );
                     })}
+                    <tr>
+                      <td style={{ padding: "14px 12px", fontWeight: 700 }}>Grand Total</td>
+                      <td className="num" style={{ padding: "14px 12px", textAlign: "right", color: "var(--muted-foreground)" }}>{expenses.length}</td>
+                      <td className="num" style={{ padding: "14px 12px", textAlign: "right", fontWeight: 700 }}>{formatUSD(summary.totalUSD)}</td>
+                      <td className="num" style={{ padding: "14px 12px", color: "var(--muted-foreground)", fontSize: 12.5 }}>100.0%</td>
+                      <td />
+                    </tr>
                   </tbody>
                 </table>
                 {activeCategory && (
@@ -244,30 +337,38 @@ export default function App() {
             </div>
 
             {/* Top merchants */}
-            <div style={{ borderRadius: 16, border: "1px solid var(--border)", background: "var(--surface)", padding: 24 }}>
-              <Eyebrow>Top 3 merchants</Eyebrow>
-              <h2 style={{ marginTop: 4, fontSize: "1.35rem", fontFamily: "var(--font-display)" }}>Biggest individual spends</h2>
-              <ol style={{ marginTop: 16, listStyle: "none", padding: 0, display: "flex", flexDirection: "column", gap: 12 }}>
-                {summary.topMerchants.map((m, i) => (
-                  <li key={m.merchant} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, paddingBottom: 12, borderBottom: i < 2 ? "1px solid var(--border)" : "none" }}>
-                    <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span className="num" style={{ fontSize: 11, color: "var(--muted-foreground)", minWidth: 18 }}>#{i + 1}</span>
-                      <span style={{ fontWeight: 600, fontSize: 14 }}>{m.merchant}</span>
-                    </span>
-                    <span className="num" style={{ fontWeight: 700, fontSize: 14, whiteSpace: "nowrap" }}>{formatUSD(m.totalUSD)}</span>
-                  </li>
-                ))}
+            <div style={{ borderRadius: 16, border: "1px solid var(--border)", background: "var(--surface)", padding: 28 }}>
+              <Eyebrow>Top 3</Eyebrow>
+              <h2 style={{ marginTop: 4, fontSize: "1.4rem", fontFamily: "var(--font-display)" }}>Biggest merchants</h2>
+              <ol style={{ marginTop: 18, listStyle: "none", padding: 0, display: "flex", flexDirection: "column", gap: 18 }}>
+                {summary.topMerchants.map((m, i) => {
+                  const maxAmt = summary.topMerchants[0]?.totalUSD || 1;
+                  return (
+                    <li key={m.merchant}>
+                      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+                        <span style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                          <span className="num" style={{ fontSize: 12, color: "var(--muted-foreground)" }}>#{i + 1}</span>
+                          <span style={{ fontWeight: 600, fontSize: 14.5, textTransform: "capitalize" }}>{m.merchant}</span>
+                        </span>
+                        <span className="num" style={{ fontWeight: 700, fontSize: 14.5, whiteSpace: "nowrap" }}>{formatUSD(m.totalUSD)}</span>
+                      </div>
+                      <div style={{ marginTop: 8, height: 7, borderRadius: 99, background: "var(--surface-2)", overflow: "hidden" }}>
+                        <div style={{ width: `${(m.totalUSD / maxAmt) * 100}%`, height: "100%", borderRadius: 99, background: "var(--brand)" }} />
+                      </div>
+                    </li>
+                  );
+                })}
               </ol>
             </div>
 
             {/* EUR What-if slider */}
-            <div style={{ borderRadius: 16, border: "1px solid var(--border)", background: "var(--surface)", padding: 24 }}>
+            <div style={{ borderRadius: 16, border: "1px solid var(--border)", background: "var(--surface)", padding: 28 }}>
               <Eyebrow>Bonus — What-if</Eyebrow>
-              <h2 style={{ marginTop: 4, fontSize: "1.35rem", fontFamily: "var(--font-display)" }}>EUR / USD rate</h2>
-              <p style={{ marginTop: 4, fontSize: 12, color: "var(--muted-foreground)" }}>
+              <h2 style={{ marginTop: 4, fontSize: "1.4rem", fontFamily: "var(--font-display)" }}>EUR / USD rate</h2>
+              <p style={{ marginTop: 5, fontSize: 12.5, color: "var(--muted-foreground)" }}>
                 Drag to see how a different EUR rate changes your total spend in dollars — not just the rate number.
               </p>
-              <div style={{ marginTop: 16, padding: 16, borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface-2)" }}>
+              <div style={{ marginTop: 18, padding: 18, borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface-2)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                   <span style={{ fontSize: 12, fontWeight: 600, color: "var(--muted-foreground)" }}>EUR rate</span>
                   <span className="num" style={{ fontWeight: 700, fontSize: 15 }}>{eurRate.toFixed(4)}</span>
@@ -284,7 +385,7 @@ export default function App() {
                   <span>1.10</span>
                 </div>
                 {Math.abs(eurDelta) > 0.005 ? (
-                  <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 8, background: eurDelta >= 0 ? "rgba(22,163,74,0.08)" : "rgba(220,38,38,0.08)", border: `1px solid ${eurDelta >= 0 ? "rgba(22,163,74,0.25)" : "rgba(220,38,38,0.25)"}` }}>
+                  <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 8, background: eurDelta >= 0 ? "rgba(22,163,74,0.08)" : "rgba(220,38,38,0.08)", border: `1px solid ${eurDelta >= 0 ? "rgba(22,163,74,0.25)" : "rgba(220,38,38,0.25)"}` }}>
                     <div style={{ fontSize: 11, fontWeight: 600, color: eurDelta >= 0 ? "#16a34a" : "#dc2626" }}>
                       {eurDelta >= 0 ? "+" : ""}{formatUSD(eurDelta)} total ({eurDelta >= 0 ? "+" : ""}{eurDeltaPct}%)
                     </div>
@@ -293,52 +394,56 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <div style={{ marginTop: 12, fontSize: 11, color: "var(--muted-foreground)" }}>At baseline — move the slider to see dollar impact.</div>
+                  <div style={{ marginTop: 14, padding: "10px 14px", borderRadius: 8, background: "var(--surface)", border: "1px solid var(--border)", fontSize: 12, color: "var(--muted-foreground)" }}>
+                    At base rate — adjust slider to see impact
+                  </div>
                 )}
               </div>
             </div>
 
-            {/* Export row */}
-            <div style={{ borderRadius: 16, border: "1px solid var(--border)", background: "var(--surface)", padding: 24 }}>
-              <Eyebrow>Export</Eyebrow>
-              <h2 style={{ marginTop: 4, fontSize: "1.35rem", fontFamily: "var(--font-display)" }}>Board-ready outputs</h2>
-              <p style={{ marginTop: 4, fontSize: 12, color: "var(--muted-foreground)" }}>
-                Downloads reflect the current state — any rate adjustment and added rows included.
+            {/* Analyst note */}
+            <div style={{ borderRadius: 16, border: "1px solid var(--border)", background: "var(--surface)", padding: 28 }}>
+              <Eyebrow>Analyst note</Eyebrow>
+              <p style={{ marginTop: 14, fontSize: 13.5, lineHeight: 1.75, color: "var(--foreground)" }}>
+                Conversion divides native amounts by their USD rate (8200 INR ÷ 83.47 = $98.24).
+                A 25th currency needs one line in the <code style={codeStyle}>RATES</code> map.
+                A null rate returns <code style={codeStyle}>null</code> — guarded in <code style={codeStyle}>toUSD()</code> — and flagging those rows is the next hardening step.
               </p>
-              <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
-                <ExportButton onClick={downloadCSV} label="Download CSV" sub="All rows, USD equivalents" />
-                <ExportButton onClick={downloadBoardReport} label="Download board report" sub="Formatted summary with % column" />
-              </div>
             </div>
           </section>
 
           {/* Add expense */}
-          <section style={{ borderRadius: 16, border: "1px solid var(--border)", background: "var(--surface)", padding: 24 }}>
+          <section style={{ borderRadius: 16, border: "1px solid var(--border)", background: "var(--surface)", padding: 28 }}>
             <Eyebrow>Quick entry</Eyebrow>
-            <h2 style={{ marginTop: 4, fontSize: "1.35rem", fontFamily: "var(--font-display)" }}>Add an expense</h2>
+            <h2 style={{ marginTop: 4, fontSize: "1.4rem", fontFamily: "var(--font-display)" }}>Add an expense</h2>
             <AddExpenseForm onAdd={(e) => setExpenses((prev) => [...prev, { ...e, id: (prev.at(-1)?.id ?? 0) + 1 }])} />
           </section>
 
           {/* Expense table */}
-          <section style={{ borderRadius: 16, border: "1px solid var(--border)", background: "var(--surface)", padding: 24 }}>
+          <section style={{ borderRadius: 16, border: "1px solid var(--border)", background: "var(--surface)", padding: 28 }}>
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", justifyContent: "space-between", gap: 12 }}>
               <div>
                 <Eyebrow>{filtered.length} of {expenses.length} rows</Eyebrow>
-                <h2 style={{ marginTop: 4, fontSize: "1.35rem", fontFamily: "var(--font-display)" }}>
+                <h2 style={{ marginTop: 4, fontSize: "1.4rem", fontFamily: "var(--font-display)" }}>
                   {activeCategory ? `${activeCategory} expenses` : "All expenses"}
                 </h2>
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {CATEGORIES.map((c) => {
                   const active = activeCategory === c;
                   return (
                     <button key={c} onClick={() => setActiveCategory(active ? null : c)}
                       style={{
+                        display: "flex", alignItems: "center",
                         borderRadius: 99, border: `1px solid ${active ? "var(--brand)" : "var(--border)"}`,
-                        background: active ? "var(--brand)" : "var(--surface-2)",
-                        color: active ? "var(--brand-foreground)" : "var(--muted-foreground)",
-                        padding: "4px 12px", fontSize: 12, fontWeight: 500, cursor: "pointer", transition: "all .12s",
+                        background: active ? "var(--brand)" : "var(--surface)",
+                        color: active ? "var(--brand-foreground)" : "var(--foreground)",
+                        padding: "6px 14px", fontSize: 12.5, fontWeight: 500, cursor: "pointer", transition: "all .12s",
                       }}>
+                      <span style={{
+                        display: "inline-block", width: 7, height: 7, borderRadius: "50%", marginRight: 8,
+                        background: active ? "var(--brand-foreground)" : (CATEGORY_COLORS[c] ?? "var(--muted-foreground)"),
+                      }} />
                       {c}
                     </button>
                   );
@@ -346,7 +451,7 @@ export default function App() {
               </div>
             </div>
 
-            <div style={{ marginTop: 16, overflowX: "auto", marginLeft: -24, marginRight: -24, paddingLeft: 24, paddingRight: 24 }}>
+            <div style={{ marginTop: 20, overflowX: "auto", marginLeft: -28, marginRight: -28, paddingLeft: 28, paddingRight: 28 }}>
               <table style={{ width: "100%", minWidth: 600, borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid var(--border)" }}>
@@ -360,13 +465,17 @@ export default function App() {
                 <tbody>
                   {filtered.map((e) => (
                     <tr key={e.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                      <td className="num" style={tdStyle({ color: "var(--muted-foreground)" })}>{e.date}</td>
-                      <td style={tdStyle({ fontWeight: 600 })}>{e.merchant}</td>
-                      <td style={tdStyle({ color: "var(--muted-foreground)" })}>{e.category}</td>
-                      <td className="num" style={tdStyle({ textAlign: "right", color: "var(--muted-foreground)" })}>
-                        {e.amount.toLocaleString()} {e.currency}
+                      <td className="num" style={tdStyle({ color: "var(--muted-foreground)", padding: "18px 12px" })}>{e.date}</td>
+                      <td style={tdStyle({ fontWeight: 600, padding: "18px 12px" })}>{e.merchant}</td>
+                      <td style={tdStyle({ padding: "18px 12px" })}>
+                        <span style={{ display: "inline-flex", alignItems: "center", color: "var(--muted-foreground)" }}>
+                          <CategoryDot category={e.category} />{e.category}
+                        </span>
                       </td>
-                      <td className="num" style={tdStyle({ textAlign: "right", fontWeight: 700 })}>
+                      <td className="num" style={tdStyle({ textAlign: "right", color: "var(--muted-foreground)", padding: "18px 12px" })}>
+                        {e.amount.toLocaleString()} <span style={{ fontSize: 11.5, opacity: 0.75 }}>{e.currency}</span>
+                      </td>
+                      <td className="num" style={tdStyle({ textAlign: "right", fontWeight: 700, padding: "18px 12px" })}>
                         {formatUSD(e.usd)}
                       </td>
                     </tr>
@@ -403,7 +512,7 @@ export default function App() {
 // ─── About / docs page ────────────────────────────────────────────────────────
 function AboutPage() {
   return (
-    <main className="mx-auto max-w-3xl px-6 py-10" style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+    <main style={{ maxWidth: 860, margin: "0 auto", padding: "40px 28px 56px", display: "flex", flexDirection: "column", gap: 32 }}>
       <DocSection eyebrow="Part A — Written response" title="How the currency conversion works">
         <p>
           Rates are stored as "1 USD = X currency units" (INR: 83.47 means $1 buys ₹83.47),
@@ -589,6 +698,17 @@ function Eyebrow({ children }: { children: React.ReactNode }) {
   );
 }
 
+function InsightCard({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ borderRadius: 16, border: "1px solid var(--border)", background: "var(--surface)", padding: "24px 26px" }}>
+      <Eyebrow>{label}</Eyebrow>
+      <p style={{ marginTop: 12, fontSize: 14.5, lineHeight: 1.65, color: "var(--foreground)" }}>
+        {children}
+      </p>
+    </div>
+  );
+}
+
 function Code({ children }: { children: string }) {
   return (
     <pre style={{ background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 16px", fontSize: 12, overflowX: "auto", lineHeight: 1.7, fontFamily: "ui-monospace, monospace" }}>
@@ -609,26 +729,6 @@ function DocSection({ eyebrow, title, children }: { eyebrow: string; title: stri
   );
 }
 
-function ExportButton({ onClick, label, sub }: { onClick: () => void; label: string; sub: string }) {
-  return (
-    <button onClick={onClick}
-      style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        width: "100%", padding: "10px 14px", borderRadius: 10,
-        border: "1px solid var(--border)", background: "var(--surface-2)",
-        cursor: "pointer", transition: "background .12s", textAlign: "left",
-      }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--accent)"; }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--surface-2)"; }}
-    >
-      <span>
-        <span style={{ fontSize: 13, fontWeight: 600, display: "block" }}>{label}</span>
-        <span style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{sub}</span>
-      </span>
-      <span style={{ fontSize: 16, color: "var(--muted-foreground)" }}>↓</span>
-    </button>
-  );
-}
 
 function SortTh({ label, sortKey, active, dir, onToggle, align = "left" }: {
   label: string; sortKey: SortKey; active: boolean; dir: SortDir;
@@ -678,34 +778,37 @@ function AddExpenseForm({ onAdd }: { onAdd: (e: Omit<Expense, "id">) => void }) 
 
   const inputStyle = (err?: string): React.CSSProperties => ({
     width: "100%", border: `1px solid ${err ? "var(--destructive)" : "var(--border)"}`,
-    background: "var(--surface)", padding: "8px 12px", borderRadius: 8, fontSize: 14,
+    background: "var(--surface)", padding: "11px 14px", borderRadius: 8, fontSize: 14,
     outline: "none", fontFamily: "inherit", boxSizing: "border-box",
   });
 
   return (
-    <form onSubmit={submit} style={{ marginTop: 16, display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))" }} noValidate>
-      <FormField label="Merchant" error={errors.merchant} style={{ gridColumn: "span 2" }}>
-        <input value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="e.g. Notion" style={inputStyle(errors.merchant)} maxLength={80} />
-      </FormField>
-      <FormField label="Amount" error={errors.amount}>
-        <input type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" style={inputStyle(errors.amount)} className="num" />
-      </FormField>
-      <FormField label="Currency">
-        <select value={currency} onChange={(e) => setCurrency(e.target.value)} style={inputStyle()}>
-          {Object.keys(RATES).map((c) => <option key={c}>{c}</option>)}
-        </select>
-      </FormField>
-      <FormField label="Category">
-        <select value={category} onChange={(e) => setCategory(e.target.value as Category)} style={inputStyle()}>
-          {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
-        </select>
-      </FormField>
-      <FormField label="Date" error={errors.date}>
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle(errors.date)} className="num" />
-      </FormField>
-      <div style={{ display: "flex", alignItems: "flex-end", gridColumn: "1 / -1" }}>
+    <form onSubmit={submit} noValidate>
+      <div style={{ marginTop: 18, paddingTop: 18, borderTop: "1px solid var(--border)" }} />
+      <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
+        <FormField label="Merchant" error={errors.merchant}>
+          <input value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="e.g. Uber" style={inputStyle(errors.merchant)} maxLength={80} />
+        </FormField>
+        <FormField label="Amount" error={errors.amount}>
+          <input type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" style={inputStyle(errors.amount)} className="num" />
+        </FormField>
+        <FormField label="Currency">
+          <select value={currency} onChange={(e) => setCurrency(e.target.value)} style={inputStyle()}>
+            {Object.keys(RATES).map((c) => <option key={c}>{c}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Category">
+          <select value={category} onChange={(e) => setCategory(e.target.value as Category)} style={inputStyle()}>
+            {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Date" error={errors.date}>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle(errors.date)} className="num" />
+        </FormField>
+      </div>
+      <div style={{ marginTop: 20 }}>
         <button type="submit"
-          style={{ padding: "9px 22px", borderRadius: 8, border: "none", background: "var(--brand)", color: "var(--brand-foreground)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+          style={{ padding: "11px 26px", borderRadius: 8, border: "none", background: "var(--brand)", color: "var(--brand-foreground)", fontSize: 13.5, fontWeight: 600, cursor: "pointer" }}>
           Add expense
         </button>
       </div>
@@ -715,8 +818,8 @@ function AddExpenseForm({ onAdd }: { onAdd: (e: Omit<Expense, "id">) => void }) 
 
 function FormField({ label, error, children, style }: { label: string; error?: string; children: React.ReactNode; style?: React.CSSProperties }) {
   return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4, ...style }}>
-      <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--muted-foreground)" }}>{label}</span>
+    <label style={{ display: "flex", flexDirection: "column", gap: 6, ...style }}>
+      <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)" }}>{label}</span>
       {children}
       {error && <span style={{ fontSize: 11, color: "var(--destructive)" }}>{error}</span>}
     </label>
