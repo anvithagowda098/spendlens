@@ -149,7 +149,7 @@ export default function App() {
     const report = [
       "═══════════════════════════════════════════════════════",
       "  SPENDLENS  ·  Monthly Board Report",
-      `  Generated ${date}  ·  Rate snapshot 2026-05-01`,
+      `  Generated ${date},
       "═══════════════════════════════════════════════════════",
       "",
       `  TOTAL SPEND  ${formatUSD(summary.totalUSD)}`,
@@ -499,7 +499,7 @@ export default function App() {
           </section>
 
           <footer style={{ borderTop: "1px solid var(--border)", paddingTop: 20, fontSize: 12, color: "var(--muted-foreground)" }}>
-            Built for the Spendlens product analyst intern assignment · Rate snapshot: 2026-05-01 (USD base) · Numbers reconcile with the static dataset.
+            Built for the Spendlens product analyst intern assignment · Numbers reconcile with the static dataset.
           </footer>
         </main>
       ) : (
@@ -605,7 +605,7 @@ docs/
       </DocSection>
 
       <footer style={{ borderTop: "1px solid var(--border)", paddingTop: 20, fontSize: 12, color: "var(--muted-foreground)" }}>
-        Spendlens intern assignment · Rate snapshot 2026-05-01 · README, CEO brief, and edge cases combined on this page for evaluator convenience.
+        Spendlens intern assignment · README, CEO brief, and edge cases combined on this page for evaluator convenience.
       </footer>
     </main>
   );
@@ -613,8 +613,7 @@ docs/
 
 const EDGE_CASES = [
   {
-    title: "Rate entry is null, undefined, or missing",
-    risk: "A category total silently drops and the board pack shows the wrong number.",
+    title: "Rate entry is null, undefined, or missing",    risk: "A category total silently drops and the board pack shows the wrong number.",
     today: "toUSD() returns null for any rate that is missing, non-finite, or ≤ 0. buildSummary() collects affected rows in a skipped array and the UI shows a red warning with the count.",
     correct: "Same as today, but also log the currency code so the rate gap can be chased down. Should arguably block report export entirely until resolved.",
   },
@@ -653,12 +652,6 @@ const EDGE_CASES = [
     risk: "Totals look 'wrong' compared to the base figure; users forget they moved the slider.",
     today: "Slider is clamped 0.80–1.10. The header shows the dollar delta AND percentage change vs baseline, not just the raw rate. A reset button snaps back to the snapshot rate. Recompute uses the same pure function so numbers can't go stale.",
     correct: "Add a persistent 'What-if mode active' badge on the header whenever the slider has been moved from baseline.",
-  },
-  {
-    title: "Narrow mobile screen (320–375px)",
-    risk: "Header overlaps totals, table overflows, form fields squash to unusable.",
-    today: "Header flex-wraps, summary cards stack, table container scrolls horizontally, form switches to single-column. Tested at 375px.",
-    correct: "A card-per-row view for the transaction table on <480px would be easier to scan than horizontal scroll.",
   },
   {
     title: "Two expenses with the same merchant, different casing ('AWS' vs 'aws')",
