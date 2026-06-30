@@ -149,7 +149,7 @@ export default function App() {
     const report = [
       "═══════════════════════════════════════════════════════",
       "  SPENDLENS  ·  Monthly Board Report",
-      `  Generated ${date},
+      `  Generated ${date}`,
       "═══════════════════════════════════════════════════════",
       "",
       `  TOTAL SPEND  ${formatUSD(summary.totalUSD)}`,
